@@ -55,7 +55,7 @@ func (db *DB) executeCommand(cmd []string) ([]byte, error) {
 }
 
 func (db *DB) rpush(args []string) ([]byte, error) {
-	key, node_val := args[0], args[1]
+	key, node_vals := args[0], args[1:]
 
 	var ll *DoublyLinkedList
 	if v, ok := db.data[key]; ok {
@@ -68,7 +68,9 @@ func (db *DB) rpush(args []string) ([]byte, error) {
 		db.data[key] = ll
 	}
 
-	ll.append(node_val)
+	for _, val := range node_vals {
+		ll.append(val)
+	}
 
 	return []byte(":" + strconv.Itoa(ll.size) + "\r\n"), nil
 }
