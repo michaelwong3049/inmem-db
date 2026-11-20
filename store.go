@@ -22,10 +22,11 @@ type command struct {
 }
 
 var commands = map[string]command{
-	"SET":  {fn: (*DB).set, minArgCount: 2},
-	"GET":  {fn: (*DB).get, minArgCount: 1},
-	"PING": {fn: (*DB).ping, minArgCount: 0},
-	"ECHO": {fn: (*DB).echo, minArgCount: 1},
+	"SET":   {fn: (*DB).set, minArgCount: 2},
+	"GET":   {fn: (*DB).get, minArgCount: 1},
+	"RPUSH": {fn: (*DB).rpush, minArgCount: 2},
+	"PING":  {fn: (*DB).ping, minArgCount: 0},
+	"ECHO":  {fn: (*DB).echo, minArgCount: 1},
 }
 
 func createDB() *DB {
@@ -51,6 +52,25 @@ func (db *DB) executeCommand(cmd []string) ([]byte, error) {
 	defer db.mu.Unlock()
 
 	return c.fn(db, args)
+}
+
+func (db *DB) rpush(args []string) ([]byte, error) {
+	key, node_val := args[0], args[1]
+
+	var ll *DoublyLinkedList
+	if v, ok := db.data[key]; ok {
+		ll, ok = v.(*DoublyLinkedList)
+		if !ok {
+			return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"), fmt.Errorf("Error running rpush")
+		}
+	} else {
+		ll = createList()
+		db.data[key] = ll
+	}
+
+	ll.append(node_val)
+
+	return []byte(":" + strconv.Itoa(ll.size) + "\r\n"), nil
 }
 
 // expired reports whether key's TTL has passed (now >= expiry), and if so
