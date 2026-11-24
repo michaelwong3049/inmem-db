@@ -1,6 +1,10 @@
 package main
 
 import (
+	"github.com/michaelwong3049/inmem-db/internal"
+)
+
+import (
 	"bufio"
 	"fmt"
 	"io"
@@ -72,7 +76,7 @@ func parseCommand(reader *bufio.Reader) ([]string, error) {
 	return cmd, nil
 }
 
-func handleConnection(conn net.Conn, db *DB) {
+func handleConnection(conn net.Conn, db *db.DB) {
 	// use the bufio and scanner in order to take the bytes that are coming in from the client
 	// parse that information
 	// run the required functions in order to update for our key value store
@@ -88,7 +92,7 @@ func handleConnection(conn net.Conn, db *DB) {
 		}
 
 		// now we can "run" this command
-		reply, err := db.executeCommand(cmd)
+		reply, err := db.ExecuteCommand(cmd)
 		if err != nil {
 			fmt.Println("Error handling this command: ", err)
 			return
@@ -105,7 +109,7 @@ func main() {
 	}
 
 	defer listener.Close()
-	db := createDB()
+	db := db.CreateDB()
 
 	fmt.Println("Started server")
 	for {
