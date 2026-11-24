@@ -215,6 +215,7 @@ func (db *DB) blpop(args []string) ([]byte, error) {
 		return []byte("-ERR timeout is negative\r\n"), nil
 	}
 
+	// set function such that when the expired time arrives, we release this blpop
 	var deadline time.Time
 	if timeout > 0 {
 		deadline = time.Now().Add(time.Duration(timeout * float64(time.Second)))
