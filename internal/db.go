@@ -31,6 +31,7 @@ var commands = map[string]command{
 	"LLEN":   {fn: (*DB).llen, minArgCount: 1},
 	"LPOP":   {fn: (*DB).lpop, minArgCount: 1},
 	"BLPOP":  {fn: (*DB).blpop, minArgCount: 2},
+	"TYPE":   {fn: (*DB).keyType, minArgCount: 1},
 	"PING":   {fn: (*DB).ping, minArgCount: 0},
 	"ECHO":   {fn: (*DB).echo, minArgCount: 1},
 }
@@ -247,6 +248,28 @@ func (db *DB) blpop(args []string) ([]byte, error) {
 		}
 
 		db.pushed.Wait()
+	}
+}
+
+// keyType replies with the name of the type of the value stored at key, as a
+// simple string: "string", "list", or "none" when the key does not exist.
+func (db *DB) keyType(args []string) ([]byte, error) {
+	key := args[0]
+
+	db.expired(key)
+
+	v, ok := db.data[key]
+	if !ok {
+		return []byte("+none\r\n"), nil
+	}
+
+	switch v.(type) {
+	case string:
+		return []byte("+string\r\n"), nil
+	case *doublyLinkedList:
+		return []byte("+list\r\n"), nil
+	default:
+		return []byte("-ERR unknown value type\r\n"), nil
 	}
 }
 

@@ -329,3 +329,49 @@ func TestBLPop(t *testing.T) {
 		}
 	})
 }
+
+func TestType(t *testing.T) {
+	t.Run("string", func(t *testing.T) {
+		db := CreateDB()
+		run(t, db, "SET", "str_key", "hello")
+
+		if got := run(t, db, "TYPE", "str_key"); got != "+string\r\n" {
+			t.Errorf("TYPE got %q, expected %q", got, "+string\r\n")
+		}
+	})
+
+	t.Run("list", func(t *testing.T) {
+		db := CreateDB()
+		run(t, db, "RPUSH", "list_key", "A")
+
+		if got := run(t, db, "TYPE", "list_key"); got != "+list\r\n" {
+			t.Errorf("TYPE got %q, expected %q", got, "+list\r\n")
+		}
+	})
+
+	t.Run("missing key", func(t *testing.T) {
+		db := CreateDB()
+
+		if got := run(t, db, "TYPE", "missing"); got != "+none\r\n" {
+			t.Errorf("TYPE got %q, expected %q", got, "+none\r\n")
+		}
+	})
+
+	t.Run("expired key", func(t *testing.T) {
+		db := CreateDB()
+		run(t, db, "SET", "str_key", "hello")
+		db.expiredTimes["str_key"] = time.Now().Add(-time.Second)
+
+		if got := run(t, db, "TYPE", "str_key"); got != "+none\r\n" {
+			t.Errorf("TYPE got %q, expected %q", got, "+none\r\n")
+		}
+	})
+
+	t.Run("too few arguments", func(t *testing.T) {
+		db := CreateDB()
+
+		if _, err := db.ExecuteCommand([]string{"TYPE"}); err == nil {
+			t.Error("expected an error for TYPE with no key")
+		}
+	})
+}
