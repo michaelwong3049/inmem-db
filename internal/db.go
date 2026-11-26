@@ -23,6 +23,8 @@ type command struct {
 }
 
 var commands = map[string]command{
+	"PING":   {fn: (*DB).ping, minArgCount: 0},
+	"ECHO":   {fn: (*DB).echo, minArgCount: 1},
 	"SET":    {fn: (*DB).set, minArgCount: 2},
 	"GET":    {fn: (*DB).get, minArgCount: 1},
 	"LPUSH":  {fn: (*DB).lpush, minArgCount: 2},
@@ -32,8 +34,6 @@ var commands = map[string]command{
 	"LPOP":   {fn: (*DB).lpop, minArgCount: 1},
 	"BLPOP":  {fn: (*DB).blpop, minArgCount: 2},
 	"TYPE":   {fn: (*DB).keyType, minArgCount: 1},
-	"PING":   {fn: (*DB).ping, minArgCount: 0},
-	"ECHO":   {fn: (*DB).echo, minArgCount: 1},
 }
 
 func CreateDB() *DB {
@@ -64,6 +64,96 @@ func (db *DB) ExecuteCommand(cmd []string) ([]byte, error) {
 	return c.fn(db, args)
 }
 
+func (db *DB) expired(key string) bool {
+	expiry, ok := db.expiredTimes[key]
+	if !ok || time.Now().Before(expiry) {
+		return false
+	}
+
+	delete(db.data, key)
+	delete(db.expiredTimes, key)
+	return true
+}
+
+func (db *DB) ping(_ []string) ([]byte, error) {
+	return []byte("+PONG\r\n"), nil
+}
+
+func (db *DB) echo(args []string) ([]byte, error) {
+	msg := args[0]
+
+	return []byte("$" + strconv.Itoa(len(msg)) + "\r\n" + msg + "\r\n"), nil
+}
+
+func (db *DB) set(args []string) ([]byte, error) {
+	key, val := args[0], args[1]
+
+	db.data[key] = val
+
+	if len(args) > 2 {
+		ttl_unit, ttl_value := args[2], args[3]
+		ttl_value_int, err := strconv.Atoi(ttl_value)
+
+		if err != nil {
+			return []byte{}, fmt.Errorf("Error parsing ttl_value %q for key %q", ttl_value, key)
+		}
+
+		switch strings.ToUpper(ttl_unit) {
+		case "EX":
+			db.expiredTimes[key] = time.Now().Add(time.Duration(ttl_value_int) * time.Millisecond)
+		case "PX":
+			db.expiredTimes[key] = time.Now().Add(time.Duration(ttl_value_int) * time.Second)
+		}
+	}
+
+	return []byte("+OK\r\n"), nil
+}
+
+func (db *DB) get(args []string) ([]byte, error) {
+	key := args[0]
+
+	if db.expired(key) {
+		return []byte("$-1\r\n"), nil
+	}
+
+	v, ok := db.data[key]
+	if !ok {
+		return []byte("$-1\r\n"), nil
+	}
+
+	s, ok := v.(string)
+	if !ok {
+		return []byte("$-1\r\n"), fmt.Errorf("Error: value is not of string type, cannot GET")
+	}
+
+	return []byte("$" + strconv.Itoa(len(s)) + "\r\n" + s + "\r\n"), nil
+}
+
+func (db *DB) rpush(args []string) ([]byte, error) {
+	key, node_vals := args[0], args[1:]
+
+	db.expired(key)
+
+	var ll *doublyLinkedList
+	if v, ok := db.data[key]; ok {
+		ll, ok = v.(*doublyLinkedList)
+		if !ok {
+			return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"), fmt.Errorf("Error running rpush")
+		}
+	} else {
+		ll = createList()
+		db.data[key] = ll
+	}
+
+	for _, val := range node_vals {
+		ll.append(val)
+	}
+
+	db.pushed.Broadcast()
+
+	return []byte(":" + strconv.Itoa(ll.size) + "\r\n"), nil
+}
+
 func (db *DB) lpush(args []string) ([]byte, error) {
 	if len(args) < 2 {
 		return []byte("-ERR wrong number of arguments for 'lpush' command\r\n"), nil
@@ -86,31 +176,6 @@ func (db *DB) lpush(args []string) ([]byte, error) {
 
 	for _, n := range node_vals {
 		ll.appendleft(n)
-	}
-
-	db.pushed.Broadcast()
-
-	return []byte(":" + strconv.Itoa(ll.size) + "\r\n"), nil
-}
-
-func (db *DB) rpush(args []string) ([]byte, error) {
-	key, node_vals := args[0], args[1:]
-
-	db.expired(key)
-
-	var ll *doublyLinkedList
-	if v, ok := db.data[key]; ok {
-		ll, ok = v.(*doublyLinkedList)
-		if !ok {
-			return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"), fmt.Errorf("Error running rpush")
-		}
-	} else {
-		ll = createList()
-		db.data[key] = ll
-	}
-
-	for _, val := range node_vals {
-		ll.append(val)
 	}
 
 	db.pushed.Broadcast()
@@ -251,8 +316,6 @@ func (db *DB) blpop(args []string) ([]byte, error) {
 	}
 }
 
-// keyType replies with the name of the type of the value stored at key, as a
-// simple string: "string", "list", or "none" when the key does not exist.
 func (db *DB) keyType(args []string) ([]byte, error) {
 	key := args[0]
 
@@ -271,69 +334,4 @@ func (db *DB) keyType(args []string) ([]byte, error) {
 	default:
 		return []byte("-ERR unknown value type\r\n"), nil
 	}
-}
-
-func (db *DB) expired(key string) bool {
-	expiry, ok := db.expiredTimes[key]
-	if !ok || time.Now().Before(expiry) {
-		return false
-	}
-
-	delete(db.data, key)
-	delete(db.expiredTimes, key)
-	return true
-}
-
-func (db *DB) get(args []string) ([]byte, error) {
-	key := args[0]
-
-	if db.expired(key) {
-		return []byte("$-1\r\n"), nil
-	}
-
-	v, ok := db.data[key]
-	if !ok {
-		return []byte("$-1\r\n"), nil
-	}
-
-	s, ok := v.(string)
-	if !ok {
-		return []byte("$-1\r\n"), fmt.Errorf("Error: value is not of string type, cannot GET")
-	}
-
-	return []byte("$" + strconv.Itoa(len(s)) + "\r\n" + s + "\r\n"), nil
-}
-
-func (db *DB) set(args []string) ([]byte, error) {
-	key, val := args[0], args[1]
-
-	db.data[key] = val
-
-	if len(args) > 2 {
-		ttl_unit, ttl_value := args[2], args[3]
-		ttl_value_int, err := strconv.Atoi(ttl_value)
-
-		if err != nil {
-			return []byte{}, fmt.Errorf("Error parsing ttl_value %q for key %q", ttl_value, key)
-		}
-
-		switch strings.ToUpper(ttl_unit) {
-		case "EX":
-			db.expiredTimes[key] = time.Now().Add(time.Duration(ttl_value_int) * time.Millisecond)
-		case "PX":
-			db.expiredTimes[key] = time.Now().Add(time.Duration(ttl_value_int) * time.Second)
-		}
-	}
-
-	return []byte("+OK\r\n"), nil
-}
-
-func (db *DB) echo(args []string) ([]byte, error) {
-	msg := args[0]
-
-	return []byte("$" + strconv.Itoa(len(msg)) + "\r\n" + msg + "\r\n"), nil
-}
-
-func (db *DB) ping(_ []string) ([]byte, error) {
-	return []byte("+PONG\r\n"), nil
 }
