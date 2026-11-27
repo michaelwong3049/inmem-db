@@ -34,6 +34,7 @@ var commands = map[string]command{
 	"LPOP":   {fn: (*DB).lpop, minArgCount: 1},
 	"BLPOP":  {fn: (*DB).blpop, minArgCount: 2},
 	"TYPE":   {fn: (*DB).keyType, minArgCount: 1},
+	"XADD":   {fn: (*DB).xadd, minArgCount: 4},
 }
 
 func CreateDB() *DB {
@@ -183,8 +184,6 @@ func (db *DB) lpush(args []string) ([]byte, error) {
 	return []byte(":" + strconv.Itoa(ll.size) + "\r\n"), nil
 }
 
-// lrange replies with the elements of the list at key from start to end,
-// both inclusive. Negative indexes count from the end (-1 is the last element).
 func (db *DB) lrange(args []string) ([]byte, error) {
 	if len(args) != 3 {
 		return []byte("-ERR wrong number of arguments for 'lrange' command\r\n"), nil
@@ -331,7 +330,38 @@ func (db *DB) keyType(args []string) ([]byte, error) {
 		return []byte("+string\r\n"), nil
 	case *doublyLinkedList:
 		return []byte("+list\r\n"), nil
+	case *Stream:
+		return []byte("+stream\r\n"), nil
 	default:
 		return []byte("-ERR unknown value type\r\n"), nil
 	}
 }
+
+func (db *DB) xadd(args []string) ([]byte, error) {
+	streamKey, entryId, pairs := args[0], args[1], args[2:]
+
+	if len(pairs)%2 != 0 {
+		return []byte("-ERR didn't not provide a value for every key\r\n"), nil
+	}
+
+	var stream *Stream
+	if v, ok := db.data[streamKey]; ok {
+		stream, ok = v.(*Stream)
+		if !ok {
+			return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"), nil
+		}
+	} else {
+		stream = createStream()
+	}
+
+	id, err := createId(entryId, stream)
+	if err != nil {
+		return []byte("-ERR Invalid stream ID specified as stream command argument\r\n"), nil
+	}
+
+	stream.append(id, pairs)
+	db.data[streamKey] = stream
+
+	return []byte("$" + strconv.Itoa(len(id)) + "\r\n" + id + "\r\n"), nil
+}
+
