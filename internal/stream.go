@@ -1,7 +1,9 @@
 package db
 
 import (
+	"cmp"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +79,45 @@ func createId(entryId string, s *Stream) (string, error) {
 	}
 
 	return strconv.Itoa(ms) + "-" + strconv.Itoa(seq), nil
+}
+
+func parseId(id string, defaultSeq int) (int, int, error) {
+	switch id {
+	case "-":
+		return 0, 0, nil
+	case "+":
+		return math.MaxInt, math.MaxInt, nil
+	}
+
+	msPart, seqPart, hasSeq := strings.Cut(id, "-")
+
+	ms, err := strconv.Atoi(msPart)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if !hasSeq {
+		return ms, defaultSeq, nil
+	}
+
+	seq, err := strconv.Atoi(seqPart)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return ms, seq, nil
+}
+
+func compareId(aMs, aSeq, bMs, bSeq int) int {
+	if c := cmp.Compare(aMs, bMs); c != 0 {
+		return c
+	}
+
+	return cmp.Compare(aSeq, bSeq)
+}
+
+func bulkString(s string) string {
+	return "$" + strconv.Itoa(len(s)) + "\r\n" + s + "\r\n"
 }
 
 func (s *Stream) append(id string, pairs []string) {

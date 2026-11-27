@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ var commands = map[string]command{
 	"BLPOP":  {fn: (*DB).blpop, minArgCount: 2},
 	"TYPE":   {fn: (*DB).keyType, minArgCount: 1},
 	"XADD":   {fn: (*DB).xadd, minArgCount: 4},
+	"XRANGE": {fn: (*DB).xrange, minArgCount: 3},
 }
 
 func CreateDB() *DB {
@@ -363,5 +365,55 @@ func (db *DB) xadd(args []string) ([]byte, error) {
 	db.data[streamKey] = stream
 
 	return []byte("$" + strconv.Itoa(len(id)) + "\r\n" + id + "\r\n"), nil
+}
+
+func (db *DB) xrange(args []string) ([]byte, error) {
+	streamKey, start, end := args[0], args[1], args[2]
+
+	v, ok := db.data[streamKey]
+	if !ok {
+		return []byte("*0\r\n"), nil
+	}
+
+	stream, ok := v.(*Stream)
+	if !ok {
+		return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"), nil
+	}
+
+	startMs, startSeq, err := parseId(start, 0)
+	if err != nil {
+		return []byte("-ERR Invalid stream ID specified as stream command argument\r\n"), nil
+	}
+
+	endMs, endSeq, err := parseId(end, math.MaxInt)
+	if err != nil {
+		return []byte("-ERR Invalid stream ID specified as stream command argument\r\n"), nil
+	}
+
+	var entries strings.Builder
+	count := 0
+
+	for _, entry := range stream.entries {
+		ms, seq, err := parseId(entry.id, 0)
+		if err != nil {
+			continue
+		}
+
+		if compareId(ms, seq, startMs, startSeq) < 0 {
+			continue
+		}
+
+		if compareId(ms, seq, endMs, endSeq) > 0 {
+			break
+		}
+
+		count++
+		entries.WriteString("*2\r\n" + bulkString(entry.id) + "*" + strconv.Itoa(len(entry.data)*2) + "\r\n")
+		for field, value := range entry.data {
+			entries.WriteString(bulkString(field) + bulkString(value))
+		}
+	}
+
+	return []byte("*" + strconv.Itoa(count) + "\r\n" + entries.String()), nil
 }
 
