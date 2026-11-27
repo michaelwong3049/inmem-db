@@ -120,6 +120,17 @@ func bulkString(s string) string {
 	return "$" + strconv.Itoa(len(s)) + "\r\n" + s + "\r\n"
 }
 
+func (e StreamEntry) encode() string {
+	var b strings.Builder
+
+	b.WriteString("*2\r\n" + bulkString(e.id) + "*" + strconv.Itoa(len(e.data)*2) + "\r\n")
+	for field, value := range e.data {
+		b.WriteString(bulkString(field) + bulkString(value))
+	}
+
+	return b.String()
+}
+
 func (s *Stream) append(id string, pairs []string) {
 	data := make(map[string]string, len(pairs)/2)
 	for i := 0; i < len(pairs); i += 2 {
@@ -131,4 +142,19 @@ func (s *Stream) append(id string, pairs []string) {
 
 func createStream() *Stream {
 	return &Stream{}
+}
+
+func (s *Stream) entriesAfter(afterMs, afterSeq int) []StreamEntry {
+	for i, entry := range s.entries {
+		ms, seq, err := parseId(entry.id, 0)
+		if err != nil {
+			continue
+		}
+
+		if compareId(ms, seq, afterMs, afterSeq) > 0 {
+			return s.entries[i:]
+		}
+	}
+
+	return nil
 }

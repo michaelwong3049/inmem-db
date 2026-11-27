@@ -37,6 +37,7 @@ var commands = map[string]command{
 	"TYPE":   {fn: (*DB).keyType, minArgCount: 1},
 	"XADD":   {fn: (*DB).xadd, minArgCount: 4},
 	"XRANGE": {fn: (*DB).xrange, minArgCount: 3},
+	"XREAD":  {fn: (*DB).xread, minArgCount: 3},
 }
 
 func CreateDB() *DB {
@@ -417,3 +418,58 @@ func (db *DB) xrange(args []string) ([]byte, error) {
 	return []byte("*" + strconv.Itoa(count) + "\r\n" + entries.String()), nil
 }
 
+func (db *DB) xread(args []string) ([]byte, error) {
+	if strings.ToUpper(args[0]) != "STREAMS" {
+		return []byte("-ERR syntax error\r\n"), nil
+	}
+
+	rest := args[1:]
+	if len(rest)%2 != 0 {
+		return []byte("-ERR Unbalanced 'xread' list of streams: for each stream key an ID, '+', or '$' must be specified.\r\n"), nil
+	}
+
+	keys, ids := rest[:len(rest)/2], rest[len(rest)/2:]
+
+	afterMs := make([]int, len(ids))
+	afterSeq := make([]int, len(ids))
+	for i, id := range ids {
+		ms, seq, err := parseId(id, 0)
+		if err != nil {
+			return []byte("-ERR Invalid stream ID specified as stream command argument\r\n"), nil
+		}
+
+		afterMs[i], afterSeq[i] = ms, seq
+	}
+
+	var streams strings.Builder
+	count := 0
+
+	for i, key := range keys {
+		v, ok := db.data[key]
+		if !ok {
+			continue
+		}
+
+		stream, ok := v.(*Stream)
+		if !ok {
+			return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"), nil
+		}
+
+		newer := stream.entriesAfter(afterMs[i], afterSeq[i])
+		if len(newer) == 0 {
+			continue
+		}
+
+		count++
+		streams.WriteString("*2\r\n" + bulkString(key) + "*" + strconv.Itoa(len(newer)) + "\r\n")
+		for _, entry := range newer {
+			streams.WriteString(entry.encode())
+		}
+	}
+
+	if count == 0 {
+		return []byte("*-1\r\n"), nil
+	}
+
+	return []byte("*" + strconv.Itoa(count) + "\r\n" + streams.String()), nil
+}
