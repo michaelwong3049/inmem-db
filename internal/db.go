@@ -451,6 +451,13 @@ func (db *DB) xread(args []string) ([]byte, error) {
 	afterMs := make([]int, len(ids))
 	afterSeq := make([]int, len(ids))
 	for i, id := range ids {
+		if id == "$" {
+			if stream, ok := db.data[keys[i]].(*Stream); ok {
+				afterMs[i], afterSeq[i] = stream.lastId()
+			}
+			continue
+		}
+
 		ms, seq, err := parseId(id, 0)
 		if err != nil {
 			return []byte("-ERR Invalid stream ID specified as stream command argument\r\n"), nil

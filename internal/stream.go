@@ -30,6 +30,16 @@ func (s *Stream) top() *StreamEntry {
 	return &s.entries[len(s.entries)-1]
 }
 
+func (s *Stream) lastId() (int, int) {
+	top := s.top()
+	if top == nil {
+		return 0, 0
+	}
+
+	ms, seq, _ := parseId(top.id, 0)
+	return ms, seq
+}
+
 func (s *Stream) createSeq(ms int) (int, error) {
 	top := s.top()
 	if top == nil {
